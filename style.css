@@ -1,0 +1,49 @@
+#graphView {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	right: 0;
+
+	color: #d0d0d0;
+	background-color: #202020;
+}
+
+.node {
+	display: inline-block;
+	position: relative;
+	min-width: 12em;
+
+	border: 1px solid #101010;
+	border-radius: 0.2em;
+	background-color: #303030;
+
+	overflow: hidden;
+}
+
+.nodeBlock {
+	padding: 0.15em 0.3em;
+
+	border-top: 1px solid #101010;
+
+	user-select: none;
+}
+
+.nodeBlock:first-child {
+	border: none;
+}
+
+.nodeName {
+	text-align: center;
+	background-color: #404040;
+
+	cursor: grab;
+}
+
+.nodeInput {
+
+}
+
+.nodeOutput {
+	text-align: right;
+}
