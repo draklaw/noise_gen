@@ -3,7 +3,7 @@ import { waveTables } from '../wave_tables/index.js'
 
 export default class ParamSet {
 	constructor() {
-		this.meta = {}
+		this.params = {}
 
 		this.setValueParam('volume', -20,
 			'Volume (dB):', -80, 0, 'linear', 2)
@@ -39,11 +39,18 @@ export default class ParamSet {
 			'High pass Q:', 0, 10, 'linear', 3)
 	}
 
+	createParameters() {
+		const params = {}
+		for(const [name, meta] of Object.entries(this))
+			params[name] = meta.default
+		return params
+	}
+
 	setValueParam(param, value, label, min, max, scale, decimals) {
-		this[param] = value
-		this.meta[param] = {
+		this[param] = {
 			type: 'value',
 			label: label,
+			default: value,
 			min: min,
 			max: max,
 			scale: scale,
@@ -52,10 +59,10 @@ export default class ParamSet {
 	}
 
 	setChoiceParam(param, value, label, choices) {
-		this[param] = value
-		this.meta[param] = {
+		this[param] = {
 			type: 'choice',
 			label: label,
+			default: value,
 			choices: choices,
 		}
 	}

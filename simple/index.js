@@ -6,7 +6,8 @@ import ParamSet from './param_set.js'
 
 export default class SimpleNG {
 	constructor() {
-		this.params = new ParamSet()
+		this.paramSet = new ParamSet()
+		this.params = this.paramSet.createParameters()
 
 		this.playCounter = 0
 		this.context = new AudioContext()
@@ -16,6 +17,7 @@ export default class SimpleNG {
 		this.sliders = {}
 		this.selects = {}
 		this.elem = null
+		this.downloadLink = null
 
 		this.context.suspend()
 
@@ -95,12 +97,27 @@ export default class SimpleNG {
 		main.stop(t + duration)
 		main.addEventListener('ended', () => {
 			this.playCounter -= 1
-			if(this.playCounter == 0)
-			this.context.suspend()
+			if(this.playCounter == 0) {
+				console.log("Done playing")
+				this.context.suspend()
+			}
 		})
 
+		if(this.playCounter == 0) {
+			console.log("Start playing...")
+			context.resume()
+		}
 		this.playCounter += 1
-		context.resume()
+	}
+
+	saveParams() {
+		const json = JSON.stringify(this.params, null, 4)
+		const blob = new Blob([json], { type: 'application/json' })
+		const url = URL.createObjectURL(blob)
+		this.downloadLink.href = url
+		this.downloadLink.download = 'noise_param.json'
+		this.downloadLink.click()
+		URL.revokeObjectURL(url)
 	}
 
 	loadWaveTables() {
@@ -134,8 +151,11 @@ export default class SimpleNG {
 	}
 
 	setupGui() {
+		this.downloadLink = el('a', { 'style': 'display: none;' })
 		this.elem = el('div', { 'class': 'simpleNG' },
+			this.downloadLink,
 			this.createButton('Play', () => this.play(this.context)),
+			this.createButton('Save params', this.saveParams.bind(this)),
 			this.createSection('General',
 				this.createSlider('volume'),
 				this.createSlider('duration'),
@@ -180,7 +200,7 @@ export default class SimpleNG {
 
 	createSlider(param) {
 		const value = this.params[param]
-		const { label, min, max, scale, decimals } = this.params.meta[param]
+		const { label, min, max, scale, decimals } = this.paramSet[param]
 
 		const slider = new Slider(value, min, max, scale, decimals)
 		slider.addEventListener('valueChanged',
@@ -194,7 +214,7 @@ export default class SimpleNG {
 
 	createComboBox(param) {
 		const value = this.params[param]
-		const { label, choices } = this.params.meta[param]
+		const { label, choices } = this.paramSet[param]
 
 		const comboBox = el('select', { 'class': 'comboBox' })
 		for(const choice of choices) {
