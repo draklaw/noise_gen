@@ -1,7 +1,7 @@
-import { el, linearFromDecibel } from '../utils.js'
-import { waveTables, loadTable } from '../wave_tables/index.js'
+import { clamp, el } from '../utils.js'
 import Slider from './slider.js'
 import ParamSet from './param_set.js'
+import Synthetizer from './synthetizer.js'
 
 
 export default class SimpleNG {
@@ -9,105 +9,27 @@ export default class SimpleNG {
 		this.paramSet = new ParamSet()
 		this.params = this.paramSet.createParameters()
 
-		this.playCounter = 0
 		this.context = new AudioContext()
-		this.waves = {}
-		this.buffers = {}
+		this.synthetizer = new Synthetizer(this.context)
 
 		this.sliders = {}
 		this.selects = {}
 		this.elem = null
 		this.downloadLink = null
+		this.nameField = null
 
 		this.context.suspend()
+		this.synthetizer.addEventListener('ended', () => {
+			if(this.synthetizer.playingGraphs.length === 0)
+				this.context.suspend()
+		})
 
-		this.loadWaveTables()
-		this.createBuffers()
 		this.setupGui()
 	}
 
-	play(context) {
-		const t = context.currentTime
-
-		const {
-			volume,
-			duration,
-			attack,
-			release,
-			startVolume,
-			endVolume,
-			startFreq,
-			endFreq,
-			waveType,
-			lowPassFreq,
-			lowPassQ,
-			highPassFreq,
-			highPassQ,
-		} = this.params
-
-		const startVol =
-			linearFromDecibel(volume) *
-			linearFromDecibel(startVolume)
-		const endVol =
-			linearFromDecibel(volume) *
-			linearFromDecibel(endVolume)
-		const attackTime = attack * duration
-		const releaseTime = release * duration
-
-		const volumeGain = context.createGain()
-		volumeGain.gain.cancelScheduledValues(t)
-		volumeGain.gain.setValueAtTime(0, t)
-		volumeGain.gain.linearRampToValueAtTime(startVol, t + attackTime)
-		volumeGain.gain.linearRampToValueAtTime(endVol, t + releaseTime)
-		volumeGain.gain.linearRampToValueAtTime(0, t + duration)
-
-		let main = null
-		const wave = this.waves[waveType]
-		if(wave) {
-			const osc = context.createOscillator()
-			osc.setPeriodicWave(this.waves[waveType])
-			osc.frequency.setValueAtTime(startFreq, t)
-			osc.frequency.linearRampToValueAtTime(endFreq, t + duration)
-			main = osc
-		}
-		else {
-			const source = context.createBufferSource()
-			source.buffer = this.buffers[waveType]
-			source.loop = true
-
-			main = source
-		}
-
-		const lowPass = context.createBiquadFilter()
-		lowPass.type = 'lowpass'
-		lowPass.frequency.value = lowPassFreq
-		lowPass.Q.value = lowPassQ
-
-		const highPass = context.createBiquadFilter()
-		highPass.type = 'highpass'
-		highPass.frequency.value = highPassFreq
-		highPass.Q.value = highPassQ
-
-		main.connect(lowPass)
-			.connect(highPass)
-			.connect(volumeGain)
-			.connect(context.destination)
-
-		main.start(t)
-		main.stop(t + duration)
-		main.addEventListener('ended', () => {
-			this.playCounter -= 1
-			if(this.playCounter == 0) {
-				console.log("Done playing")
-				this.context.suspend()
-			}
-		})
-
-		if(this.playCounter == 0) {
-			console.log("Start playing...")
-			context.resume()
-		}
-		this.playCounter += 1
+	play() {
+		this.synthetizer.play(this.params)
+		this.context.resume()
 	}
 
 	saveParams() {
@@ -115,47 +37,74 @@ export default class SimpleNG {
 		const blob = new Blob([json], { type: 'application/json' })
 		const url = URL.createObjectURL(blob)
 		this.downloadLink.href = url
-		this.downloadLink.download = 'noise_param.json'
+		this.downloadLink.download = `${this.nameField.value}.json`
 		this.downloadLink.click()
 		URL.revokeObjectURL(url)
 	}
 
-	loadWaveTables() {
-		const createTable = (name, table) => {
-			if(table) {
-				const real = Float32Array.from(table.real)
-				const imag = Float32Array.from(table.imag)
-				const wave = this.context.createPeriodicWave(real, imag)
-				this.waves[name] = wave
-			}
+	async saveSound() {
+		const context = new OfflineAudioContext(
+			1,
+			this.params.duration * this.context.sampleRate,
+			this.context.sampleRate,
+		)
+
+		const synth = new Synthetizer(context)
+		await synth.load()
+		synth.play(this.params)
+
+		const audioBuffer = await context.startRendering()
+		const channel = audioBuffer.getChannelData(0)
+
+		const buffer = new ArrayBuffer(44 + channel.length * 4)
+		const view = new DataView(buffer)
+
+		// Hand-made .wav saver. Yay !
+		view.setUint32(0, 0x52494646)	// 'RIFF'
+		view.setUint32(4, 36 + channel.length * 4, true) // Total size (-8 for the 2 first fields)
+		view.setUint32(8, 0x57415645)	// 'WAVE'
+
+		view.setUint32(12, 0x666d7420)	// 'fmt '
+		view.setUint32(16, 16, true)	// Chunk size
+		view.setUint16(20, 1, true)		// Format (1 = linear)
+		view.setUint16(22, 1, true)		// # channels
+		view.setUint32(24, context.sampleRate, true)	// Sample rate
+		view.setUint32(28, 4 * context.sampleRate, true)	// Byte rate
+		view.setUint16(32, 4, true)		// BlockAlign (bytes per sample * # channels)
+		view.setUint16(34, 32, true)	// Bits per sample
+
+		view.setUint32(36, 0x64617461)	// 'data'
+		view.setUint32(40, 4 * channel.length, true) // Chunk size
+
+		// Data !
+		for(let i = 0; i < channel.length; ++i) {
+			const clamped = clamp(channel[i], -1, 1)
+			const int = clamped * 0x80000000
+			view.setInt32(44 + i * 4, int, true)
 		}
 
-		for(const [name, table] of Object.entries(waveTables)) {
-			if(table === null) {
-				loadTable(name).then((table) => createTable(name, table))
-			}
-			else {
-				createTable(table)
-			}
-		}
-	}
-
-	createBuffers() {
-		const sampleRate = this.context.sampleRate
-
-		const white = this.context.createBuffer(1, sampleRate * 2, sampleRate)
-		var whiteBuffer = white.getChannelData(0)
-		for(let i = 0; i < whiteBuffer.length; ++i)
-			whiteBuffer[i] = Math.random() * 2 - 1
-		this.buffers.white_noise = white
+		const blob = new Blob([buffer], { type: 'audio/wav' })
+		const url = URL.createObjectURL(blob)
+		this.downloadLink.href = url
+		this.downloadLink.download = `${this.nameField.value}.wav`
+		this.downloadLink.click()
+		URL.revokeObjectURL(url)
 	}
 
 	setupGui() {
 		this.downloadLink = el('a', { 'style': 'display: none;' })
+		this.nameField = el('input', {
+			'class': 'nameField',
+			'type': 'text',
+			'value': 'noise',
+		})
+
 		this.elem = el('div', { 'class': 'simpleNG' },
 			this.downloadLink,
 			this.createButton('Play', () => this.play(this.context)),
+			this.nameField,
 			this.createButton('Save params', this.saveParams.bind(this)),
+			this.createButton('Save sound', this.saveSound.bind(this)),
 			this.createSection('General',
 				this.createSlider('volume'),
 				this.createSlider('duration'),
