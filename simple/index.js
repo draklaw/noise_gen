@@ -11,6 +11,7 @@ export default class SimpleNG {
 
 		this.context = new AudioContext()
 		this.synthetizer = new Synthetizer(this.context)
+		this.synthetizer.load()
 
 		this.sliders = {}
 		this.selects = {}
