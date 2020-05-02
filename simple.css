@@ -1,6 +1,13 @@
+.githubRibbon {
+	position: absolute;
+	top: 0;
+	right: 0;
+}
+
 
 #mainPanel {
 	font-family: sans-serif;
+	margin: auto;
 }
 
 .sectionTitle {
