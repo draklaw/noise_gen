@@ -1,13 +1,15 @@
 import { clamp, el } from '../utils.js'
-import Slider from './slider.js'
 import ParamSet from './param_set.js'
 import Synthetizer from './synthetizer.js'
+import InputPanel from './input_panel.js'
+import ValueWidget from './value_widget.js'
 
 
 export default class SimpleNG {
 	constructor() {
 		this.paramSet = new ParamSet()
 		this.params = this.paramSet.createParameters()
+		window.params = this.params
 
 		this.context = new AudioContext()
 		this.synthetizer = new Synthetizer(this.context)
@@ -29,6 +31,7 @@ export default class SimpleNG {
 	}
 
 	play() {
+		console.log("Play", this.params)
 		this.synthetizer.play(this.params)
 		this.context.resume()
 	}
@@ -100,6 +103,35 @@ export default class SimpleNG {
 			'value': 'noise',
 		})
 
+		const makeParams = name => [
+			name,
+			this.params[name],
+			this.paramSet[name],
+			value => this.params[name] = value,
+		]
+
+		const generalControls = new InputPanel()
+			.addSlider(...makeParams('volume'))
+			.addSlider(...makeParams('duration'))
+
+		const enveloppeControls = new InputPanel()
+			.addSlider(...makeParams('attack'))
+			.addSlider(...makeParams('release'))
+			.addSlider(...makeParams('startVolume'))
+			.addSlider(...makeParams('endVolume'))
+
+		const oscControls = new InputPanel()
+			.addSelect(...makeParams('waveType'))
+			.addRow('frequency', new ValueWidget(...makeParams('frequency')))
+			// .addSlider(...makeParams('startFreq'))
+			// .addSlider(...makeParams('endFreq'))
+
+		const filtersControls = new InputPanel()
+			.addSlider(...makeParams('highPassFreq'))
+			.addSlider(...makeParams('highPassQ'))
+			.addSlider(...makeParams('lowPassFreq'))
+			.addSlider(...makeParams('lowPassQ'))
+
 		this.elem = el('div', { 'class': 'simpleNG' },
 			this.downloadLink,
 			this.createButton('Play', () => this.play(this.context)),
@@ -107,25 +139,16 @@ export default class SimpleNG {
 			this.createButton('Save params', this.saveParams.bind(this)),
 			this.createButton('Save sound', this.saveSound.bind(this)),
 			this.createSection('General',
-				this.createSlider('volume'),
-				this.createSlider('duration'),
+				generalControls.render(),
 			),
 			this.createSection('Enveloppe',
-				this.createSlider('attack'),
-				this.createSlider('release'),
-				this.createSlider('startVolume'),
-				this.createSlider('endVolume'),
+				enveloppeControls.render(),
 			),
 			this.createSection('Main oscillator',
-				this.createComboBox('waveType'),
-				this.createSlider('startFreq'),
-				this.createSlider('endFreq',),
+				oscControls.render(),
 			),
 			this.createSection('Filters',
-				this.createSlider('lowPassFreq'),
-				this.createSlider('lowPassQ'),
-				this.createSlider('highPassFreq'),
-				this.createSlider('highPassQ'),
+				filtersControls.render(),
 			),
 		)
 
@@ -137,51 +160,6 @@ export default class SimpleNG {
 			el('h2', { 'class': 'sectionTitle' }, title),
 			...children
 		)
-	}
-
-	createField(label, widget) {
-		return el('div', { 'class': 'field' },
-			el('div', { 'class': 'fieldLabel' }, label),
-			widget,
-		)
-	}
-
-	// createControllableField(param, label)
-
-	createSlider(param) {
-		const value = this.params[param]
-		const { label, min, max, scale, decimals } = this.paramSet[param]
-
-		const slider = new Slider(value, min, max, scale, decimals)
-		slider.addEventListener('valueChanged',
-			() => { this.params[param] = slider.value() }
-		)
-
-		this.sliders[param] = slider
-
-		return this.createField(label, slider.element())
-	}
-
-	createComboBox(param) {
-		const value = this.params[param]
-		const { label, choices } = this.paramSet[param]
-
-		const comboBox = el('select', { 'class': 'comboBox' })
-		for(const choice of choices) {
-			comboBox.appendChild(el('option', {
-				'value': choice,
-				'enabled': (choice === value)? true: undefined
-			},
-				choice,
-			))
-		}
-		comboBox.addEventListener('input',
-			() => { this.params[param] = comboBox.value }
-		)
-
-		this.selects[param] = comboBox
-
-		return this.createField(label, comboBox)
 	}
 
 	createButton(label, callback) {

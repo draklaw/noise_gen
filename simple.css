@@ -38,6 +38,28 @@
 	flex-grow: 1;
 }
 
+.button {
+	padding: 0.2em 0.8em;
+	background: #f8f8f8;
+	border: 0.5px solid #b0b0b0;
+	border-radius: 0.2em;
+	/* box-shadow:
+		inset 0.5px 0.5px 0.5px 0.5px #ffffff,
+		inset -0.5px -0.5px 0.5px 0.5px #c0c0c0; */
+	background-image: linear-gradient(#00000000, #00000010);
+}
+
+.button.checked, .button:active {
+	/* box-shadow:
+		inset 0.5px 0.5px 0.5px 0.5px #c0c0c0,
+		inset -0.5px -0.5px 0.5px 0.5px #ffffff; */
+	background-image: linear-gradient(#00000020, #00000010);
+}
+
+.button.play {
+	background: #80ff80;
+}
+
 .slider {
 	display: flex;
 	flex-direction: row;

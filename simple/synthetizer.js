@@ -34,6 +34,50 @@ export default class Synthetizer extends EventTarget {
 		})
 	}
 
+	createControl(param, target, duration) {
+		console.log(param)
+
+		if(param === +param) {
+			target.value = param
+			return
+		}
+		target.value = 0
+
+		const context = this.context
+		const t = context.currentTime
+
+		const constant = context.createConstantSource()
+		constant.start()
+
+		if(param.slope === undefined)
+			constant.offset.value = param.value
+		else {
+			constant.offset.setValueAtTime(param.slope.start, t)
+			constant.offset.linearRampToValueAtTime(param.slope.end, t + duration)
+		}
+
+		let output_node = constant
+
+		if(param.lfo !== undefined) {
+			const lfo = context.createOscillator()
+			lfo.start()
+			lfo.setPeriodicWave(this.waves[param.lfo.type])
+			lfo.frequency.value = param.lfo.frequency
+
+			const ampGain = context.createGain()
+			ampGain.gain.value = param.lfo.amplitude
+			lfo.connect(ampGain)
+
+			const lfoGain = context.createGain()
+			ampGain.connect(lfoGain.gain)
+			constant.connect(lfoGain)
+
+			lfoGain.connect(target)
+		}
+
+		output_node.connect(target)
+	}
+
 	playSync(params) {
 		const context = this.context
 		const t = context.currentTime
@@ -45,8 +89,7 @@ export default class Synthetizer extends EventTarget {
 			release,
 			startVolume,
 			endVolume,
-			startFreq,
-			endFreq,
+			frequency,
 			waveType,
 			lowPassFreq,
 			lowPassQ,
@@ -77,9 +120,7 @@ export default class Synthetizer extends EventTarget {
 		if(wave) {
 			nodes.main = context.createOscillator(),
 			nodes.main.setPeriodicWave(this.waves[waveType])
-			nodes.main.frequency.cancelScheduledValues(t)
-			nodes.main.frequency.setValueAtTime(startFreq, t)
-			nodes.main.frequency.linearRampToValueAtTime(endFreq, t + duration)
+			this.createControl(frequency, nodes.main.frequency, duration)
 		}
 		else {
 			nodes.main = context.createBufferSource(),

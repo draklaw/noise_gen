@@ -1,16 +1,28 @@
-import { clamp, el } from '../utils.js';
+import { clamp, el } from '../utils.js'
+import { Input } from './component.js'
 
 
-export default class Slider extends EventTarget {
-	constructor(value, min=0, max=0, scale='linear', decimals=2) {
-		super()
+export default class Slider extends Input {
+	constructor(value, min=0, max=1, scale='linear', decimals=2) {
+		super(value)
 
-		this._value = NaN
 		this._min = min
 		this._max = max
 		this._scale = scale
 		this._decimals = decimals
 
+		this._numberElem = null
+		this._rangeElem = null
+		this._elem = null
+	}
+
+	updateValue(value) {
+		this._value = clamp(+value, this._min, this._max)
+		this._numberElem.value = this._value.toFixed(this._decimals)
+		this._rangeElem.value = this._sliderFromValue(this._value)
+	}
+
+	initialRender() {
 		this._numberElem = el('input', {
 			'class': 'sliderNumber',
 			'type': 'number',
@@ -18,6 +30,8 @@ export default class Slider extends EventTarget {
 			'max': `${this._max}`,
 			'step': 'any',
 		})
+		this._numberElem.addEventListener('input',
+			this._numberValueChanged.bind(this))
 
 		this._rangeElem = el('input', {
 			'class': 'sliderRange',
@@ -26,44 +40,23 @@ export default class Slider extends EventTarget {
 			'max': `${this._max}`,
 			'step': 'any',
 		})
-
-		this._elem = el('div', { 'class': 'slider fieldWidget' },
-			this._numberElem,
-			this._rangeElem,
-		)
-
-		this._numberElem.addEventListener('input',
-			this._numberValueChanged.bind(this))
 		this._rangeElem.addEventListener('input',
 			this._rangeValueChanged.bind(this))
 
-		this.setValue(value)
-	}
+		this.updateValue(this._value)
 
-	value() {
-		return this._value
-	}
-
-	setValue(value) {
-		value = clamp(value, this._min, this._max, value)
-		if(value != this._value) {
-			this._value = value
-			this._numberElem.value = this._value.toFixed(this._decimals)
-			this._rangeElem.value = this._sliderFromValue(this._value)
-			this.dispatchEvent(new Event('valueChanged'))
-		}
-	}
-
-	element() {
-		return this._elem
+		return el('div', { 'class': 'slider fieldWidget' },
+			this._numberElem,
+			this._rangeElem,
+		)
 	}
 
 	_numberValueChanged(event) {
-		this.setValue(this._numberElem.value)
+		this.value = this._numberElem.value
 	}
 
 	_rangeValueChanged(value) {
-		this.setValue(this._valueFromSlider(this._rangeElem.value))
+		this.value = this._valueFromSlider(this._rangeElem.value)
 	}
 
 	_sliderFromValue(value) {
