@@ -34,11 +34,15 @@ export default class Synthetizer extends EventTarget {
 		})
 	}
 
-	createControl(param, target, duration) {
+	createControl(param, target, duration, options={}) {
 		console.log(param)
 
+		const {
+			transform = value => value,
+		} = options
+
 		if(param === +param) {
-			target.value = param
+			target.value = transform(param)
 			return
 		}
 		target.value = 0
@@ -50,10 +54,12 @@ export default class Synthetizer extends EventTarget {
 		constant.start()
 
 		if(param.slope === undefined)
-			constant.offset.value = param.value
+			constant.offset.value = transform(param.value)
 		else {
-			constant.offset.setValueAtTime(param.slope.start, t)
-			constant.offset.linearRampToValueAtTime(param.slope.end, t + duration)
+			constant.offset.setValueAtTime(
+				transform(param.slope.start), t)
+			constant.offset.linearRampToValueAtTime(
+				transform(param.slope.end), t + duration)
 		}
 
 		let output_node = constant
@@ -82,13 +88,13 @@ export default class Synthetizer extends EventTarget {
 		const context = this.context
 		const t = context.currentTime
 
-		const {
+		let {
 			volume,
 			duration,
 			attack,
+			delay,
+			sustain,
 			release,
-			startVolume,
-			endVolume,
 			frequency,
 			waveType,
 			lowPassFreq,
@@ -99,21 +105,24 @@ export default class Synthetizer extends EventTarget {
 
 		const nodes = {}
 
-		const startVol =
-			linearFromDecibel(volume) *
-			linearFromDecibel(startVolume)
-		const endVol =
-			linearFromDecibel(volume) *
-			linearFromDecibel(endVolume)
-		const attackTime = attack * duration
-		const releaseTime = release * duration
+		duration = Math.max(duration, attack + delay + release + 0.01)
 
-		nodes.volumeGain = context.createGain(),
+		nodes.volumePreGain = context.createGain()
+		this.createControl(volume, nodes.volumePreGain.gain, duration, {
+			transform: linearFromDecibel,
+		})
+
+		nodes.volumeGain = context.createGain()
 		nodes.volumeGain.gain.cancelScheduledValues(t)
 		nodes.volumeGain.gain.setValueAtTime(0, t)
-		nodes.volumeGain.gain.linearRampToValueAtTime(startVol, t + attackTime)
-		nodes.volumeGain.gain.linearRampToValueAtTime(endVol, t + releaseTime)
-		nodes.volumeGain.gain.linearRampToValueAtTime(0, t + duration)
+		nodes.volumeGain.gain.linearRampToValueAtTime(
+			1, t + attack)
+		nodes.volumeGain.gain.linearRampToValueAtTime(
+			sustain, t + attack + delay)
+		nodes.volumeGain.gain.setValueAtTime(
+			sustain, t + duration - release)
+		nodes.volumeGain.gain.linearRampToValueAtTime(
+			0, t + duration)
 
 		let main = null
 		const wave = this.waves[waveType]
@@ -130,17 +139,18 @@ export default class Synthetizer extends EventTarget {
 
 		nodes.lowPass = context.createBiquadFilter(),
 		nodes.lowPass.type = 'lowpass'
-		nodes.lowPass.frequency.value = lowPassFreq
+		this.createControl(lowPassFreq, nodes.lowPass.frequency, duration)
 		nodes.lowPass.Q.value = lowPassQ
 
 		nodes.highPass = context.createBiquadFilter(),
 		nodes.highPass.type = 'highpass'
-		nodes.highPass.frequency.value = highPassFreq
+		this.createControl(highPassFreq, nodes.highPass.frequency, duration)
 		nodes.highPass.Q.value = highPassQ
 
 		nodes.main
 			.connect(nodes.lowPass)
 			.connect(nodes.highPass)
+			.connect(nodes.volumePreGain)
 			.connect(nodes.volumeGain)
 			.connect(context.destination)
 

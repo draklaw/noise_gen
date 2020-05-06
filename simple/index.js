@@ -111,25 +111,23 @@ export default class SimpleNG {
 		]
 
 		const generalControls = new InputPanel()
-			.addSlider(...makeParams('volume'))
+			.addRow('frequency', new ValueWidget(...makeParams('volume')))
 			.addSlider(...makeParams('duration'))
 
 		const enveloppeControls = new InputPanel()
 			.addSlider(...makeParams('attack'))
+			.addSlider(...makeParams('delay'))
+			.addSlider(...makeParams('sustain'))
 			.addSlider(...makeParams('release'))
-			.addSlider(...makeParams('startVolume'))
-			.addSlider(...makeParams('endVolume'))
 
 		const oscControls = new InputPanel()
 			.addSelect(...makeParams('waveType'))
 			.addRow('frequency', new ValueWidget(...makeParams('frequency')))
-			// .addSlider(...makeParams('startFreq'))
-			// .addSlider(...makeParams('endFreq'))
 
 		const filtersControls = new InputPanel()
-			.addSlider(...makeParams('highPassFreq'))
+			.addRow('frequency', new ValueWidget(...makeParams('highPassFreq')))
 			.addSlider(...makeParams('highPassQ'))
-			.addSlider(...makeParams('lowPassFreq'))
+			.addRow('frequency', new ValueWidget(...makeParams('lowPassFreq')))
 			.addSlider(...makeParams('lowPassQ'))
 
 		this.elem = el('div', { 'class': 'simpleNG' },
