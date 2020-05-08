@@ -1,7 +1,8 @@
 import { el } from '../utils.js'
-import Component from './component.js'
+import Component, { Input } from './component.js'
 import Slider from './slider.js'
 import ComboBox from './combo_box.js'
+import { Button } from './toolbar.js'
 
 
 export class LabelInput extends Component {
@@ -81,6 +82,52 @@ export default class InputPanel extends Component {
 
 		for(const row of this._rows)
 			elem.appendChild(row.render())
+
+		return elem
+	}
+}
+
+
+export class Section extends Input {
+	constructor(label, options={}, ...children) {
+		super(false)
+
+		const {
+			checkable = false,
+		} = options
+
+		this._label = label
+		this._checkable = checkable
+		this._children = children
+		this._button = null
+	}
+
+	updateValue(value) {
+		this._value = value
+		console.log('value:', value)
+
+		for(const child of this._children)
+			child.visible = value
+	}
+
+	initialRender() {
+		const title = el('h2', { 'class': 'sectionTitle' }, this._label)
+		if(this._checkable) {
+			this._button = new Button('Enable', { checkable: true })
+			this._button.addEventListener('valueChanged',
+				event => this.value = event.value)
+
+			title.appendChild(this._button.render())
+		}
+
+		const elem = el('div', { 'class': 'section' },
+			title,
+		)
+
+		for(const child of this._children) {
+			elem.appendChild(child.render())
+			child.visible = !this._checkable || this._value
+		}
 
 		return elem
 	}

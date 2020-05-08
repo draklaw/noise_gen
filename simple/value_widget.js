@@ -123,7 +123,7 @@ export default class ValueWidget extends Input {
 			this._lfoPanel = new InputPanel()
 				.addSelect('type', 'sine', {
 					label: 'LFO type:',
-					choices: ['sine', 'saw', 'triangle', 'square'],
+					choices: ['sine', 'square', 'sawtooth', 'triangle'],
 				}, update)
 				.addSlider('amplitude', 1, {
 					label: 'LFO amplitude:',

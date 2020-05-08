@@ -73,3 +73,7 @@
 .sliderRange {
 	flex-grow: 1;
 }
+
+.sectionTitle .button {
+	margin-left: 1em;
+}

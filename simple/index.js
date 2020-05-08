@@ -1,7 +1,7 @@
 import { clamp, el } from '../utils.js'
 import ParamSet from './param_set.js'
 import Synthetizer from './synthetizer.js'
-import InputPanel from './input_panel.js'
+import InputPanel, { Section } from './input_panel.js'
 import ValueWidget from './value_widget.js'
 
 
@@ -10,6 +10,10 @@ export default class SimpleNG {
 		this.paramSet = new ParamSet()
 		this.params = this.paramSet.createParameters()
 		window.params = this.params
+
+		this.phaser = this.params.phaser
+		this.lowPass = this.params.lowPass
+		this.highPass = this.params.highPass
 
 		this.context = new AudioContext()
 		this.synthetizer = new Synthetizer(this.context)
@@ -23,7 +27,7 @@ export default class SimpleNG {
 
 		this.context.suspend()
 		this.synthetizer.addEventListener('ended', () => {
-			if(this.synthetizer.playingGraphs.length === 0)
+			if(this.synthetizer.playingNodes.length === 0)
 				this.context.suspend()
 		})
 
@@ -31,8 +35,17 @@ export default class SimpleNG {
 	}
 
 	play() {
-		console.log("Play", this.params)
-		this.synthetizer.play(this.params)
+		params = { ...this.params }
+
+		if(!this.phaserSection.value)
+			params.phaser = null
+		if(!this.lowPassSection.value)
+			params.lowPass = null
+		if(!this.highPassSection.value)
+			params.highPass = null
+
+		console.log("Play", params)
+		this.synthetizer.play(params)
 		this.context.resume()
 	}
 
@@ -82,9 +95,9 @@ export default class SimpleNG {
 
 		// Data !
 		for(let i = 0; i < channel.length; ++i) {
-			const clamped = clamp(channel[i], -1, 1)
-			const int = clamped * 0x80000000
-			view.setInt32(44 + i * 4, int, true)
+			const int = channel[i] * 0x80000000
+			const clamped = clamp(int, -0x80000000, 0x7fffffff)
+			view.setInt32(44 + i * 4, clamped, true)
 		}
 
 		const blob = new Blob([buffer], { type: 'audio/wav' })
@@ -103,32 +116,52 @@ export default class SimpleNG {
 			'value': 'noise',
 		})
 
-		const makeParams = name => [
-			name,
-			this.params[name],
-			this.paramSet[name],
-			value => this.params[name] = value,
+		const makeParams = (...path) => [
+			path.join('.'),
+			this.params.get(path),
+			this.paramSet.get(path),
+			value => this.params.set(path, value),
 		]
 
-		const generalControls = new InputPanel()
-			.addRow('frequency', new ValueWidget(...makeParams('volume')))
-			.addSlider(...makeParams('duration'))
+		this.generalSection = new Section('General', {},
+			new InputPanel()
+				.addRow('volume', new ValueWidget(...makeParams('volume')))
+				.addSlider(...makeParams('duration'))
+		)
 
-		const enveloppeControls = new InputPanel()
-			.addSlider(...makeParams('attack'))
-			.addSlider(...makeParams('delay'))
-			.addSlider(...makeParams('sustain'))
-			.addSlider(...makeParams('release'))
+		this.enveloppeSection = new Section('Enveloppe', {},
+			new InputPanel()
+				.addSlider(...makeParams('enveloppe', 'attack'))
+				.addSlider(...makeParams('enveloppe', 'delay'))
+				.addSlider(...makeParams('enveloppe', 'sustain'))
+				.addSlider(...makeParams('enveloppe', 'release'))
+		)
 
-		const oscControls = new InputPanel()
-			.addSelect(...makeParams('waveType'))
-			.addRow('frequency', new ValueWidget(...makeParams('frequency')))
+		this.sourceSection = new Section('Source', {},
+			new InputPanel()
+				.addSelect(...makeParams('source', 'waveType'))
+				.addRow('frequency', new ValueWidget(...makeParams('source', 'frequency')))
+		)
 
-		const filtersControls = new InputPanel()
-			.addRow('frequency', new ValueWidget(...makeParams('highPassFreq')))
-			.addSlider(...makeParams('highPassQ'))
-			.addRow('frequency', new ValueWidget(...makeParams('lowPassFreq')))
-			.addSlider(...makeParams('lowPassQ'))
+		this.phaserSection = new Section('Phaser', { checkable: true },
+			new InputPanel()
+				.addRow('frequency', new ValueWidget(...makeParams('phaser', 'frequency')))
+				.addSlider(...makeParams('phaser', 'stages'))
+				.addSlider(...makeParams('phaser', 'q'))
+				.addSlider(...makeParams('phaser', 'dryWet'))
+		)
+
+		this.highPassSection = new Section('High pass', { checkable: true },
+			new InputPanel()
+				.addRow('frequency', new ValueWidget(...makeParams('highPass', 'frequency')))
+				.addSlider(...makeParams('highPass', 'q'))
+		)
+
+		this.lowPassSection = new Section('Low pass', { checkable: true },
+			new InputPanel()
+				.addRow('frequency', new ValueWidget(...makeParams('lowPass', 'frequency')))
+				.addSlider(...makeParams('lowPass', 'q'))
+		)
 
 		this.elem = el('div', { 'class': 'simpleNG' },
 			this.downloadLink,
@@ -136,18 +169,12 @@ export default class SimpleNG {
 			this.nameField,
 			this.createButton('Save params', this.saveParams.bind(this)),
 			this.createButton('Save sound', this.saveSound.bind(this)),
-			this.createSection('General',
-				generalControls.render(),
-			),
-			this.createSection('Enveloppe',
-				enveloppeControls.render(),
-			),
-			this.createSection('Main oscillator',
-				oscControls.render(),
-			),
-			this.createSection('Filters',
-				filtersControls.render(),
-			),
+			this.generalSection.render(),
+			this.enveloppeSection.render(),
+			this.sourceSection.render(),
+			this.phaserSection.render(),
+			this.lowPassSection.render(),
+			this.highPassSection.render(),
 		)
 
 		return this.elem

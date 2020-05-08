@@ -11,7 +11,7 @@ export default class Synthetizer extends EventTarget {
 		this.waves = {}
 		this.buffers = {}
 
-		this.playingGraphs = []
+		this.playingNodes = []
 	}
 
 	load() {
@@ -23,8 +23,8 @@ export default class Synthetizer extends EventTarget {
 	play(params) {
 		return new Promise((ok, error) => {
 			try {
-				const main = this.playSync(params)
-				main.addEventListener('ended', () => {
+				const node = this.playSync(params)
+				node.addEventListener('ended', () => {
 					ok()
 				})
 			}
@@ -34,56 +34,6 @@ export default class Synthetizer extends EventTarget {
 		})
 	}
 
-	createControl(param, target, duration, options={}) {
-		console.log(param)
-
-		const {
-			transform = value => value,
-		} = options
-
-		if(param === +param) {
-			target.value = transform(param)
-			return
-		}
-		target.value = 0
-
-		const context = this.context
-		const t = context.currentTime
-
-		const constant = context.createConstantSource()
-		constant.start()
-
-		if(param.slope === undefined)
-			constant.offset.value = transform(param.value)
-		else {
-			constant.offset.setValueAtTime(
-				transform(param.slope.start), t)
-			constant.offset.linearRampToValueAtTime(
-				transform(param.slope.end), t + duration)
-		}
-
-		let output_node = constant
-
-		if(param.lfo !== undefined) {
-			const lfo = context.createOscillator()
-			lfo.start()
-			lfo.setPeriodicWave(this.waves[param.lfo.type])
-			lfo.frequency.value = param.lfo.frequency
-
-			const ampGain = context.createGain()
-			ampGain.gain.value = param.lfo.amplitude
-			lfo.connect(ampGain)
-
-			const lfoGain = context.createGain()
-			ampGain.connect(lfoGain.gain)
-			constant.connect(lfoGain)
-
-			lfoGain.connect(target)
-		}
-
-		output_node.connect(target)
-	}
-
 	playSync(params) {
 		const context = this.context
 		const t = context.currentTime
@@ -91,97 +41,29 @@ export default class Synthetizer extends EventTarget {
 		let {
 			volume,
 			duration,
-			attack,
-			delay,
-			sustain,
-			release,
-			frequency,
-			waveType,
-			lowPassFreq,
-			lowPassQ,
-			highPassFreq,
-			highPassQ,
+			enveloppe,
 		} = params
 
-		const nodes = {}
+		duration = Math.max(duration,
+			enveloppe.attack + enveloppe.delay + enveloppe.release + 0.01)
 
-		duration = Math.max(duration, attack + delay + release + 0.01)
+		const node = new SimpleSynth(this, duration, params)
+		node.addEventListener('ended', () => this.stop(node))
 
-		nodes.volumePreGain = context.createGain()
-		this.createControl(volume, nodes.volumePreGain.gain, duration, {
-			transform: linearFromDecibel,
-		})
+		connect(node, context.destination)
 
-		nodes.volumeGain = context.createGain()
-		nodes.volumeGain.gain.cancelScheduledValues(t)
-		nodes.volumeGain.gain.setValueAtTime(0, t)
-		nodes.volumeGain.gain.linearRampToValueAtTime(
-			1, t + attack)
-		nodes.volumeGain.gain.linearRampToValueAtTime(
-			sustain, t + attack + delay)
-		nodes.volumeGain.gain.setValueAtTime(
-			sustain, t + duration - release)
-		nodes.volumeGain.gain.linearRampToValueAtTime(
-			0, t + duration)
+		this.playingNodes.push(node)
 
-		let main = null
-		const wave = this.waves[waveType]
-		if(wave) {
-			nodes.main = context.createOscillator(),
-			nodes.main.setPeriodicWave(this.waves[waveType])
-			this.createControl(frequency, nodes.main.frequency, duration)
-		}
-		else {
-			nodes.main = context.createBufferSource(),
-			nodes.main.buffer = this.buffers[waveType]
-			nodes.main.loop = true
-		}
-
-		nodes.lowPass = context.createBiquadFilter(),
-		nodes.lowPass.type = 'lowpass'
-		this.createControl(lowPassFreq, nodes.lowPass.frequency, duration)
-		nodes.lowPass.Q.value = lowPassQ
-
-		nodes.highPass = context.createBiquadFilter(),
-		nodes.highPass.type = 'highpass'
-		this.createControl(highPassFreq, nodes.highPass.frequency, duration)
-		nodes.highPass.Q.value = highPassQ
-
-		nodes.main
-			.connect(nodes.lowPass)
-			.connect(nodes.highPass)
-			.connect(nodes.volumePreGain)
-			.connect(nodes.volumeGain)
-			.connect(context.destination)
-
-		this.playingGraphs.push(nodes)
-
-		nodes.main.start(t)
-		nodes.main.stop(t + duration)
-		nodes.main.addEventListener('ended', () => this.stop(nodes))
-
-		return nodes.main
+		return node
 	}
 
-	stop(nodes = null) {
-		if(nodes === null) {
-			const playingGraphs = this.playingGraphs.slice()
-			for(const nodes of playingGraphs)
-				this.stop(nodes)
-			return
-		}
-
-		for(const node of Object.values(nodes))
-		{
-			node.disconnect()
-			if(node instanceof AudioScheduledSourceNode)
-				node.stop()
-		}
-
-		const index = this.playingGraphs.indexOf(nodes)
+	stop(node) {
+		const index = this.playingNodes.indexOf(node)
 		if(index < 0)
 			throw new Error("Node graph not found")
-		this.playingGraphs.splice(index, 1)
+		this.playingNodes.splice(index, 1)
+
+		node.destroy()
 
 		this.dispatchEvent(new Event('ended'))
 	}
@@ -221,4 +103,379 @@ export default class Synthetizer extends EventTarget {
 			whiteBuffer[i] = Math.random() * 2 - 1
 		this.buffers.white_noise = white
 	}
+}
+
+
+class Node extends EventTarget {
+	constructor(synth, duration) {
+		super()
+
+		this.synth = synth
+		this.duration = duration
+
+		this.inputs = []
+		this.outputs = []
+	}
+
+	connect(target, options={}) {
+		const {
+			outputIndex = 0,
+			inputIndex = 0,
+		} = options
+
+		if(target instanceof Node) {
+			this.outputs[outputIndex].connect(target.inputs[inputIndex])
+		}
+		else if(target instanceof AudioNode) {
+			this.outputs[outputIndex].connect(target, 0, inputIndex)
+		}
+		else {
+			this.outputs[outputIndex].connect(target)
+		}
+	}
+
+	destroy() {
+		for(const node of this.inputs)
+			node.disconnect()
+		for(const node of this.outputs)
+			node.disconnect()
+	}
+}
+
+
+class SimpleSynth extends Node {
+	constructor(synth, duration, params={}) {
+		super(synth, duration)
+
+		this.source = new Source(synth, duration, params.source)
+		this.source.addEventListener('ended',
+			() => this.dispatchEvent(new Event('ended')))
+
+		let output = this.source
+
+		this.phaser = null
+		if(params.phaser !== null) {
+			this.phaser = new Phaser(synth, duration, params.phaser)
+			output = connect(output, this.phaser)
+		}
+
+		this.highPass = null
+		if(params.highPass !== null) {
+			this.highPass = new BiquadFilter(synth, duration, {
+				...params.highPass,
+				type: 'highpass',
+			})
+
+			output = connect(output, this.highPass)
+		}
+
+		this.lowPass = null
+		if(params.lowPass !== null) {
+			this.lowPass = new BiquadFilter(synth, duration, {
+				...params.lowPass,
+				type: 'lowpass',
+			})
+
+			output = connect(output, this.lowPass)
+		}
+
+		this.adsr = new Adsr(synth, duration, params.enveloppe)
+		output = connect(output, this.adsr)
+
+		this.volumeControl = new ControlNode(synth, duration, params.volume, {
+			transform: linearFromDecibel,
+		})
+
+		this.outputVolume = synth.context.createGain()
+		this.outputVolume.gain.value = 0
+		connect(this.volumeControl, this.outputVolume.gain)
+		connect(output, this.outputVolume)
+
+		this.outputs.push(this.outputVolume)
+	}
+
+	destroy() {
+		this.outputVolume.disconnect()
+		this.volumeControl.destroy()
+		this.adsr.destroy()
+		if(this.lowPass)
+			this.lowPass.destroy()
+		if(this.highPass)
+			this.highPass.destroy()
+		if(this.phaser)
+			this.phaser.destroy()
+		this.source.destroy()
+		super.destroy()
+	}
+}
+
+
+class Source extends Node {
+	constructor(synth, duration, params={}) {
+		super(synth, duration)
+
+		const {
+			waveType = 'sine',
+			frequency = 440,
+		} = params
+
+		this.freqControl = null
+
+		const wave = synth.waves[waveType]
+		if(wave) {
+			this.source = synth.context.createOscillator()
+			this.source.setPeriodicWave(synth.waves[waveType])
+			this.source.frequency.value = 0
+
+			this.freqControl = new ControlNode(synth, duration, params.frequency)
+			connect(this.freqControl, this.source.frequency)
+		}
+		else {
+			this.source = synth.context.createBufferSource()
+			this.source.buffer = synth.buffers[waveType]
+			this.source.loop = true
+		}
+
+		this.inputs.push(this.source)
+		this.outputs.push(this.source)
+
+		this.source.start()
+		this.source.stop(synth.context.currentTime + duration)
+
+		this.source.addEventListener('ended',
+			() => this.dispatchEvent(new Event('ended')))
+	}
+
+	destroy() {
+		this.inputs[0].stop()
+		if(this.freqControl)
+			this.freqControl.destroy()
+		super.destroy()
+	}
+}
+
+
+class Adsr extends Node {
+	constructor(synth, duration, params) {
+		super(synth, duration)
+
+		const {
+			attack = 0.05,
+			delay = 0.1,
+			sustain = 0.7,
+			release = 0.2,
+		} = params
+
+		const t = synth.context.currentTime
+
+		this.gain = synth.context.createGain()
+		this.gain.gain.cancelScheduledValues(t)
+		this.gain.gain.setValueAtTime(0, t)
+		this.gain.gain.linearRampToValueAtTime(
+			1, t + attack)
+		this.gain.gain.linearRampToValueAtTime(
+			sustain, t + attack + delay)
+		this.gain.gain.setValueAtTime(
+			sustain, t + duration - release)
+		this.gain.gain.linearRampToValueAtTime(
+			0, t + duration)
+
+		this.inputs.push(this.gain)
+		this.outputs.push(this.gain)
+	}
+}
+
+
+class DryWet extends Node {
+	constructor(synth, duration, params) {
+		super(synth, duration)
+
+		const {
+			dryWet = 0
+		} = params
+
+		this.inputs.push(synth.context.createGain())
+		this.inputs.push(synth.context.createGain())
+
+		this.outputs.push(synth.context.createGain())
+
+		this.inputs[0].gain.value = 1 - dryWet
+		this.inputs[1].gain.value = dryWet
+
+		this.inputs[0].connect(this.outputs[0])
+		this.inputs[1].connect(this.outputs[0])
+	}
+}
+
+
+class BiquadFilter extends Node {
+	constructor(synth, duration, params) {
+		super(synth, duration)
+
+		const {
+			frequency,
+			q,
+			type,
+		} = params
+
+		this.filter = synth.context.createBiquadFilter()
+		this.filter.type = type
+		this.filter.frequency.value = 0
+		this.filter.Q.value = q
+
+		this.control = new ControlNode(synth, duration, frequency)
+		connect(this.control, this.filter.frequency)
+
+		this.inputs.push(this.filter)
+		this.outputs.push(this.filter)
+	}
+
+	destroy() {
+		this.control.destroy()
+		super.destroy()
+	}
+}
+
+
+class Phaser extends Node {
+	constructor(synth, duration, params) {
+		super(synth, duration)
+
+		const {
+			frequency = 440,
+			stages = 4,
+			q = 10,
+			dryWet = 0.5,
+		} = params
+
+
+		this.dryWet = new DryWet(synth, duration, {
+			dryWet: dryWet
+		})
+
+		this.inputs.push(synth.context.createGain())
+		this.inputs[0].gain.value = 1
+
+		this.outputs.push(this.dryWet.outputs[0])
+
+		this.filters = []
+
+		this.freqControl = new ControlNode(synth, duration, frequency)
+
+		let node = this.inputs[0]
+		for(let i = 0; i < stages; ++i) {
+			const filter = synth.context.createBiquadFilter()
+			filter.type = 'allpass'
+			filter.frequency.value = 0
+			connect(this.freqControl, filter.frequency)
+			filter.Q.value = q
+
+			this.filters.push(filter)
+			node = node.connect(filter)
+		}
+
+		connect(this.inputs[0], this.dryWet, { inputIndex: 0 })
+
+		connect(this.inputs[0], this.filters[0])
+		connect(node, this.dryWet, { inputIndex: 1 })
+	}
+
+	destroy() {
+		super.destroy()
+
+		this.dryWet.destroy()
+		this.freqControl.destroy()
+		for(const node of this.filters)
+			node.disconnect()
+	}
+}
+
+
+class ControlNode extends Node {
+	constructor(synth, duration, params, options={}) {
+		super(synth, duration)
+
+		if(params === +params)
+			params = { value: params }
+
+		const {
+			transform = value => value,
+		} = options
+
+		const t = synth.context.currentTime
+
+		this.value = synth.context.createConstantSource()
+		this.value.offset.value = 0
+		this.value.start()
+
+		if(params.slope === undefined)
+			this.value.offset.value = transform(params.value)
+		else {
+			this.value.offset.setValueAtTime(
+				transform(params.slope.start), t)
+			this.value.offset.linearRampToValueAtTime(
+				transform(params.slope.end), t + duration)
+		}
+
+		this.outputs.push(this.value)
+
+		this.lfo = null
+		this.ampGain = null
+		this.lfoGain = null
+		if(params.lfo !== undefined) {
+			this.lfo = synth.context.createOscillator()
+			this.lfo.type = params.lfo.type
+			this.lfo.frequency.value = params.lfo.frequency
+			this.lfo.start()
+
+			// This is a * lfo
+			this.ampGain = synth.context.createGain()
+			this.ampGain.gain.value = params.lfo.amplitude
+			connect(this.lfo, this.ampGain)
+
+			// So this is v * (1 + a * lfo)
+			this.lfoGain = synth.context.createGain()
+			this.lfoGain.gain.value = 1
+			connect(this.ampGain, this.lfoGain.gain)
+			this.outputs[0] = connect(this.outputs[0], this.lfoGain)
+		}
+	}
+
+	destroy() {
+		this.value.stop()
+		if(this.lfo) {
+			this.lfo.stop()
+			this.lfoGain.disconnect()
+			this.ampGain.disconnect()
+			this.lfo.disconnect()
+		}
+		this.value.disconnect()
+		super.destroy()
+	}
+}
+
+
+function connect(source, target, options={}) {
+	if(source instanceof Node) {
+		source.connect(target, options)
+	}
+	else if(target instanceof Node) {
+		const {
+			outputIndex = 0,
+			inputIndex = 0,
+		} = options
+		source.connect(target.inputs[inputIndex], outputIndex)
+	}
+	else {
+		const {
+			outputIndex = 0,
+			inputIndex = 0,
+		} = options
+		if(target instanceof AudioNode)
+			source.connect(target, outputIndex, inputIndex)
+		else
+			source.connect(target)
+	}
+
+	return target
 }

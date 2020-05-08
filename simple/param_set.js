@@ -1,78 +1,153 @@
 import { waveTables } from '../wave_tables/index.js'
 
 
+function valueParam(value, label, min, max, scale, decimals, options=[]) {
+	return {
+		type: 'value',
+		label: label,
+		default: value,
+		min: min,
+		max: max,
+		scale: scale,
+		decimals: decimals,
+		options: options,
+	}
+}
+
+function choiceParam(value, label, choices) {
+	return {
+		type: 'choice',
+		label: label,
+		default: value,
+		choices: choices,
+	}
+}
+
+
 export default class ParamSet {
 	constructor() {
-		this.setValueParam('volume', -20,
+		this.volume = valueParam(
+			-20,
 			'Volume (dB):', -80, 0, 'linear', 2,
 			['slope', 'lfo'],
 		)
-		this.setValueParam('duration', 1,
-			'Duration (s):', 0.01, 100, 'logarithmic', 3)
-
-		this.setChoiceParam('waveType', 'sine',
-			'Wave type:',
-			Array.from(Object.keys(waveTables))
-				.concat(['white_noise'])
-		)
-		this.setValueParam('frequency', 440,
-			'Frequency (Hz):', 27.5, 7040, 'logarithmic', 2,
-			['slope', 'lfo'],
+		this.duration = valueParam(
+			1,
+			'Duration (s):', 0.01, 100, 'logarithmic', 3,
 		)
 
-		this.setValueParam('attack', 0.05,
-			'Attack:', 0, 1, 'linear', 3)
-		this.setValueParam('delay', 0.05,
-			'Delay:', 0, 1, 'linear', 3)
-		this.setValueParam('sustain', 0.7,
-			'Sustain:', 0, 1, 'linear', 3)
-		this.setValueParam('release', 0.5,
-			'Release:', 0, 1, 'linear', 3)
-		this.setValueParam('startVolume', 0,
-			'Start volume (dB):', -80, 0, 'linear', 2)
-		this.setValueParam('endVolume', 0,
-			'End volume (dB):', -80, 0, 'linear', 2)
+		this.source = {
+			waveType: choiceParam(
+				'sine', 'Wave type:',
+				Array.from(Object.keys(waveTables))
+					.concat(['white_noise']),
+			),
+			frequency: valueParam(
+				440,
+				'Frequency (Hz):', 27.5, 7040, 'logarithmic', 2,
+				['slope', 'lfo'],
+			),
+		}
 
-		this.setValueParam('lowPassFreq', 1760,
-			'Low pass freq (Hz):', 27.5, 7040, 'logarithmic', 2,
-			['slope', 'lfo'],
-		)
-		this.setValueParam('lowPassQ', 1,
-			'Low pass Q:', 0, 10, 'linear', 3)
-		this.setValueParam('highPassFreq', 110,
-			'High pass freq (Hz):', 27.5, 7040, 'logarithmic', 2,
-			['slope', 'lfo'],
-		)
-		this.setValueParam('highPassQ', 1,
-			'High pass Q:', 0, 10, 'linear', 3)
+		this.enveloppe = {
+			attack: valueParam(
+				0.05,
+				'Attack:', 0, 1, 'linear', 3,
+			),
+			delay: valueParam(
+				0.05,
+				'Delay:', 0, 1, 'linear', 3,
+			),
+			sustain: valueParam(
+				0.7,
+				'Sustain:', 0, 1, 'linear', 3,
+			),
+			release: valueParam(
+				0.5,
+				'Release:', 0, 1, 'linear', 3,
+			),
+		}
+
+		this.phaser = {
+			frequency: valueParam(
+				440,
+				'Frequency (Hz):', 27.5, 7040, 'logarithmic', 2,
+				['slope', 'lfo'],
+			),
+			stages: valueParam(
+				4,
+				'Stages:', 1, 32, 'linear', 0,
+			),
+			q: valueParam(
+				10,
+				'Q:', 0, 100, 'linear', 3,
+			),
+			dryWet: valueParam(
+				0.5,
+				'dry/wet:', 0, 1, 'linear', 3,
+			),
+		}
+
+		this.lowPass = {
+			frequency: valueParam(
+				1760,
+				'Frequency (Hz):', 27.5, 7040, 'logarithmic', 2,
+				['slope', 'lfo'],
+			),
+			q: valueParam(
+				10,
+				'Q:', 0, 100, 'linear', 3,
+			),
+		}
+
+		this.highPass = {
+			frequency: valueParam(
+				110,
+				'Frequency (Hz):', 27.5, 7040, 'logarithmic', 2,
+				['slope', 'lfo'],
+			),
+			q: valueParam(
+				10,
+				'Q:', 0, 100, 'linear', 3,
+			),
+		}
+	}
+
+	get(path) {
+		let param = this
+		for(const name of path)
+			param = param[name]
+		return param
 	}
 
 	createParameters() {
-		const params = {}
-		for(const [name, meta] of Object.entries(this))
-			params[name] = meta.default
-		return params
+		return this._createParameters(new Params(), this)
 	}
 
-	setValueParam(param, value, label, min, max, scale, decimals, options=[]) {
-		this[param] = {
-			type: 'value',
-			label: label,
-			default: value,
-			min: min,
-			max: max,
-			scale: scale,
-			decimals: decimals,
-			options: options,
-		}
+	_createParameters(dst, src) {
+		if(src.default !== undefined)
+			return src.default
+		for(const [name, meta] of Object.entries(src))
+			dst[name] = this._createParameters({}, meta)
+		return dst
+	}
+}
+
+
+class Params {
+	constructor() {
 	}
 
-	setChoiceParam(param, value, label, choices) {
-		this[param] = {
-			type: 'choice',
-			label: label,
-			default: value,
-			choices: choices,
-		}
+	get(path) {
+		let param = this
+		for(const name of path)
+			param = param[name]
+		return param
+	}
+
+	set(path, value) {
+		const last = path.length - 1
+		const parent = this.get(path.slice(0, last))
+		parent[path[last]] = value
 	}
 }
