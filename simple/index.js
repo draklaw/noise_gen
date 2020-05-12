@@ -60,9 +60,14 @@ export default class SimpleNG {
 	}
 
 	async saveSound() {
+		let { duration, enveloppe } = this.params
+
+		duration = Math.max(duration,
+			enveloppe.attack + enveloppe.delay + enveloppe.release + 0.01)
+
 		const context = new OfflineAudioContext(
 			1,
-			this.params.duration * this.context.sampleRate,
+			duration * this.context.sampleRate,
 			this.context.sampleRate,
 		)
 
